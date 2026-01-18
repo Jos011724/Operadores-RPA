@@ -11,10 +11,7 @@ function Login({ onLogin }) {
     e.preventDefault();
     setError("");
     try {
-      const res = await axios.post("${API_URL}/api/auth/login", {
-        run,
-        password,
-      });
+      const res = await axios.post(`${API_URL}/api/auth/login`, { run, password });
       onLogin(res.data.token);
     } catch (err) {
       if (!err.response) setError("Error de conexión (Backend apagado)");
