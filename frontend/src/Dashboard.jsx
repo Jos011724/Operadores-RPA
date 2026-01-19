@@ -39,14 +39,12 @@ function Dashboard({ token }) {
       const decoded = jwtDecode(token);
       setRol(decoded.rol);
       setDatosUsuario({ run: decoded.run, id: decoded.id, nombre: decoded.nombre || 'Usuario', apellido: decoded.apellido || '' });
-      const dronG = localStorage.getItem(`dron_turno_${decoded.run}`);
-      const baseG = localStorage.getItem(`base_turno_${decoded.run}`);
-      if (dronG) setDronEnTurno(JSON.parse(dronG));
-      if (baseG) setBaseEnTurno(baseG);
       if (decoded.rol === 'admin') setActiveTab('admin_users');
-      else setActiveTab(dronG ? 'bitacora' : 'inicio_turno');
     }
-    cargarDatos();
+    cargarDatosGenerales();
+    if (jwtDecode(token).rol === 'operador') {
+        verificarTurnoActivo();
+    }
   }, [token]);
 
   useEffect(() => {
@@ -58,15 +56,30 @@ function Dashboard({ token }) {
     }
   }, [formVuelo.hora_inicio, formVuelo.hora_fin]);
 
-  const cargarDatos = async () => {
+  const verificarTurnoActivo = async () => {
+      try {
+          const res = await axios.get(`${API_URL}/api/users/me`, config);
+          if (res.data.dron_actual) {
+              setDronEnTurno(res.data.dron_actual);
+              setBaseEnTurno(res.data.base_actual);
+              setActiveTab('bitacora'); // Si tiene turno, mandarlo directo a bitácora
+          } else {
+              setActiveTab('inicio_turno');
+          }
+      } catch (error) {
+          console.error("Error verificando turno");
+      }
+  };
+
+  const cargarDatosGenerales = async () => {
     try {
-      // USO DE API_URL EN CARGA DE DATOS
       const resDrones = await axios.get(`${API_URL}/api/drones`, config);
       setDrones(resDrones.data);
       const resBat = await axios.get(`${API_URL}/api/baterias`, config);
       setBaterias(resBat.data);
       const resVuelos = await axios.get(`${API_URL}/api/vuelos`, config);
       setVuelos(resVuelos.data);
+      
       const decoded = jwtDecode(token);
       if (decoded.rol === 'admin') {
         const resUsers = await axios.get(`${API_URL}/api/users`, config);
@@ -75,20 +88,29 @@ function Dashboard({ token }) {
     } catch (e) { console.error("Error datos"); }
   };
 
-  const iniciarTurno = (dron, base) => {
+  const iniciarTurno = async (dron, base) => {
     if (!dron || !base) return alert("Faltan datos");
-    setDronEnTurno(dron); setBaseEnTurno(base);
-    localStorage.setItem(`dron_turno_${datosUsuario.run}`, JSON.stringify(dron));
-    localStorage.setItem(`base_turno_${datosUsuario.run}`, base);
-    setActiveTab('bitacora');
+    try {
+        await axios.put(`${API_URL}/api/users/turno`, { dron_id: dron._id, base: base }, config);
+        setDronEnTurno(dron);
+        setBaseEnTurno(base);
+        setActiveTab('bitacora');
+        setMensaje("✅ Turno iniciado y sincronizado en la nube");
+    } catch (error) {
+        alert("Error al iniciar turno en el servidor");
+    }
   };
 
-  const liberarDronTurno = () => {
-    if(window.confirm("¿CONFIRMAR FIN DE TURNO?\nSe liberará el equipo asignado.")) {
-        setDronEnTurno(null); setBaseEnTurno('');
-        localStorage.removeItem(`dron_turno_${datosUsuario.run}`);
-        localStorage.removeItem(`base_turno_${datosUsuario.run}`);
-        setActiveTab('inicio_turno');
+  const liberarDronTurno = async () => {
+    if(window.confirm("¿CONFIRMAR FIN DE TURNO?\nSe liberará el equipo asignado en todos tus dispositivos.")) {
+        try {
+            await axios.put(`${API_URL}/api/users/turno`, { dron_id: null, base: '' }, config);
+            setDronEnTurno(null);
+            setBaseEnTurno('');
+            setActiveTab('inicio_turno');
+        } catch (error) {
+            alert("Error al finalizar turno");
+        }
     }
   };
 
@@ -97,9 +119,8 @@ function Dashboard({ token }) {
   const handleVueloSubmit = async (e) => {
     e.preventDefault();
     try {
-      // USO DE API_URL EN VUELOS
       await axios.post(`${API_URL}/api/vuelos`, { ...formVuelo, duracion_min: duracionCalc, equipo_id: dronEnTurno._id, base: baseEnTurno }, config);
-      setMensaje('✅ Vuelo guardado correctamente'); cargarDatos(); setMostrarModalBitacora(true);
+      setMensaje('✅ Vuelo guardado correctamente'); cargarDatosGenerales(); setMostrarModalBitacora(true);
       setFormVuelo({...formVuelo, observacion: '', predio: '', coordenadas: ''}); 
     } catch (e) { setMensaje(`❌ Error: ${e.response?.data?.error}`); }
   };
@@ -108,36 +129,20 @@ function Dashboard({ token }) {
       e.preventDefault();
       const { id_bat1, ciclos1, id_bat2, ciclos2, observacion } = formParBaterias;
       try {
-          // USO DE API_URL EN BATERÍAS
           await axios.put(`${API_URL}/api/baterias/ciclos/${id_bat1}`, { nuevos_ciclos: ciclos1, observacion }, config);
           if (id_bat2 && ciclos2) await axios.put(`${API_URL}/api/baterias/ciclos/${id_bat2}`, { nuevos_ciclos: ciclos2, observacion }, config);
-          setMensaje("✅ Ciclos actualizados"); setFormParBaterias({ id_bat1: '', ciclos1: '', id_bat2: '', ciclos2: '', observacion: '' }); cargarDatos();
+          setMensaje("✅ Ciclos actualizados"); setFormParBaterias({ id_bat1: '', ciclos1: '', id_bat2: '', ciclos2: '', observacion: '' }); cargarDatosGenerales();
       } catch (error) { alert("Error al actualizar"); }
   };
 
-  // --- FUNCIONES ADMIN CORREGIDAS ---
-  const handleCrearUsuario = async (e) => { 
-      e.preventDefault(); 
-      try { 
-          // AQUÍ ESTABA EL ERROR: AHORA APUNTA A RENDER (${API_URL})
-          await axios.post(`${API_URL}/api/users`, newUser, config); 
-          setMensaje("✅ Usuario creado correctamente"); 
-          cargarDatos(); 
-          setNewUser({ run: '', nombre: '', apellido: '', password: '', rol: 'operador' }); 
-      } catch (e) { 
-          // Si falla, mostramos el error real
-          setMensaje(`❌ Error: ${e.response?.data?.error || 'Error de conexión con Render'}`); 
-      }
-  };
-
-  const handleCrearDron = async (e) => { e.preventDefault(); try { await axios.post(`${API_URL}/api/drones`, newDrone, config); setMensaje("Dron OK"); cargarDatos(); } catch (e) { setMensaje("Error Dron"); }};
-  const handleCrearBateria = async (e) => { e.preventDefault(); if(!newBattery.equipo_id) return alert("Asigna equipo"); try { await axios.post(`${API_URL}/api/baterias`, newBattery, config); setMensaje("Batería OK"); cargarDatos(); } catch (e) { setMensaje("Error Batería"); }};
-  const handleToggleUser = async (u) => { try { await axios.put(`${API_URL}/api/users/${u._id}`, { activo: !u.activo }, config); cargarDatos(); } catch(e){} };
-
-  // --- ELIMINAR ---
-  const handleDeleteUser = async (id) => { if(window.confirm("⚠️ ¿ELIMINAR USUARIO?\nEsta acción es irreversible.")) { try { await axios.delete(`${API_URL}/api/users/${id}`, config); cargarDatos(); } catch(e){ alert("Error al eliminar"); } } };
-  const handleDeleteDrone = async (id) => { if(window.confirm("⚠️ ¿ELIMINAR EQUIPO?\nSe perderá el historial asociado.")) { try { await axios.delete(`${API_URL}/api/drones/${id}`, config); cargarDatos(); } catch(e){ alert("Error al eliminar"); } } };
-  const handleDeleteBattery = async (id) => { if(window.confirm("⚠️ ¿ELIMINAR BATERÍA?")) { try { await axios.delete(`${API_URL}/api/baterias/${id}`, config); cargarDatos(); } catch(e){ alert("Error al eliminar"); } } };
+  // --- ADMIN ---
+  const handleCrearUsuario = async (e) => { e.preventDefault(); try { await axios.post(`${API_URL}/api/users`, newUser, config); setMensaje("✅ Usuario creado"); cargarDatosGenerales(); setNewUser({ run: '', nombre: '', apellido: '', password: '', rol: 'operador' }); } catch (e) { setMensaje(`❌ Error: ${e.response?.data?.error}`); } };
+  const handleCrearDron = async (e) => { e.preventDefault(); try { await axios.post(`${API_URL}/api/drones`, newDrone, config); setMensaje("Dron OK"); cargarDatosGenerales(); } catch (e) { setMensaje("Error Dron"); }};
+  const handleCrearBateria = async (e) => { e.preventDefault(); if(!newBattery.equipo_id) return alert("Asigna equipo"); try { await axios.post(`${API_URL}/api/baterias`, newBattery, config); setMensaje("Batería OK"); cargarDatosGenerales(); } catch (e) { setMensaje("Error Batería"); }};
+  const handleToggleUser = async (u) => { try { await axios.put(`${API_URL}/api/users/${u._id}`, { activo: !u.activo }, config); cargarDatosGenerales(); } catch(e){} };
+  const handleDeleteUser = async (id) => { if(window.confirm("⚠️ ¿ELIMINAR USUARIO?")) { try { await axios.delete(`${API_URL}/api/users/${id}`, config); cargarDatosGenerales(); } catch(e){ alert("Error"); } } };
+  const handleDeleteDrone = async (id) => { if(window.confirm("⚠️ ¿ELIMINAR EQUIPO?")) { try { await axios.delete(`${API_URL}/api/drones/${id}`, config); cargarDatosGenerales(); } catch(e){ alert("Error"); } } };
+  const handleDeleteBattery = async (id) => { if(window.confirm("⚠️ ¿ELIMINAR BATERÍA?")) { try { await axios.delete(`${API_URL}/api/baterias/${id}`, config); cargarDatosGenerales(); } catch(e){ alert("Error"); } } };
 
   const misBaterias = dronEnTurno ? baterias.filter(b => b.equipo_id?._id === dronEnTurno._id) : [];
 
