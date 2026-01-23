@@ -31,7 +31,6 @@ const userSchema = new mongoose.Schema({
   password: { type: String, required: true },
   rol: { type: String, enum: ['admin', 'operador'], default: 'operador' },
   activo: { type: Boolean, default: true },
-  // NUEVOS CAMPOS PARA GUARDAR EL TURNO EN LA NUBE
   dron_actual: { type: mongoose.Schema.Types.ObjectId, ref: 'Drone', default: null },
   base_actual: { type: String, default: '' }
 });
